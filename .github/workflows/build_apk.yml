@@ -24,12 +24,10 @@ jobs:
     - name: Setup Android SDK components
       run: |
         echo "ANDROID_HOME=$ANDROID_HOME"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        ls -la $ANDROID_HOME || ls -la $ANDROID_SDK_ROOT || true
-        # Install required components if missing
+        ls -la $ANDROID_HOME || true
         sdkmanager --version || true
         yes | sdkmanager --licenses || true
-        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "sdkmanager install failed - may already installed"
+        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393" || echo "install done/skip"
         sdkmanager --list_installed || true
 
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
@@ -38,22 +36,42 @@ jobs:
         gradle-version: 8.4
         cache-read-only: false
 
-    - name: List project files
+    - name: Project diagnostics
       run: |
-        pwd
-        ls -R
-        cat settings.gradle
-        cat build.gradle
-        cat app/build.gradle
-        cat gradle.properties || true
-        cat gradle/wrapper/gradle-wrapper.properties || true
+        echo "=== settings.gradle ==="; cat settings.gradle; echo
+        echo "=== build.gradle ==="; cat build.gradle; echo
+        echo "=== app/build.gradle ==="; cat app/build.gradle; echo
+        echo "=== gradle.properties ==="; cat gradle.properties || true
+        echo "=== wrapper ==="; cat gradle/wrapper/gradle-wrapper.properties || true
+        echo "=== java ==="; java -version
+        echo "=== gradle ==="; gradle --version
 
     - name: Build APK with Gradle
+      id: build
       run: |
-        set -o pipefail
-        gradle assembleDebug --stacktrace --info 2>&1 | tee build.log
-        echo "EXIT_CODE=${PIPESTATUS[0]}"
-        exit ${PIPESTATUS[0]}
+        set +e
+        gradle assembleDebug --stacktrace 2>&1 | tee build.log
+        EXIT_CODE=${PIPESTATUS[0]}
+        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+        # Always create summary
+        echo "## Build Result" >> $GITHUB_STEP_SUMMARY
+        echo "Exit code: $EXIT_CODE" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Last 200 lines of build.log" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        tail -n 200 build.log >> $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Full log (first 500 lines)" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        head -n 500 build.log >> $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        # Also emit as annotation for API visibility
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "::error::Gradle build failed with exit $EXIT_CODE - check summary"
+          tail -n 100 build.log | while IFS= read -r line; do echo "::warning::$line"; done || true
+        fi
+        exit $EXIT_CODE
 
     - name: Upload APK
       if: success()
@@ -63,14 +81,10 @@ jobs:
         path: app/build/outputs/apk/debug/*.apk
         if-no-files-found: warn
 
-    - name: Upload build log and reports
+    - name: Upload build log artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: |
-          build.log
-          app/build/reports/
-          build/reports/
-          app/build/outputs/logs/
-        if-no-files-found: ignore
+        path: build.log
+        if-no-files-found: error
