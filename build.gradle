@@ -1,17 +1,11 @@
+// Top-level build file - fixed for Gradle 8.x / AGP 8.x
+// This replaces the old buildscript + allprojects pattern that fails on Gradle 8.7+ / 9.x
+// repositories are now defined in settings.gradle via dependencyResolutionManagement
 
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.0'
-    }
+plugins {
+    id 'com.android.application' version '8.2.2' apply false
 }
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
+task clean(type: Delete) {
+    delete rootProject.buildDir
 }
