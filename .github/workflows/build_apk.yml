@@ -50,60 +50,38 @@ jobs:
         path: app/build/outputs/apk/debug/*.apk
         retention-days: 30
 
-    - name: Create Verified Direct Links
+    - name: Create GitHub Release with Direct Download
+      if: success()
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: build-${{ github.run_number }}
+        name: Build ${{ github.run_number }} - APK
+        body: |
+          APK built from commit ${{ github.sha }}
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Direct download available below.
+        files: app/build/outputs/apk/debug/*.apk
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create Verified Direct Links File
       if: success()
       run: |
-        APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
-        echo "Found APK: $APK"
-        ls -lh "$APK"
-        echo "APK size: $(du -h $APK | cut -f1)"
-        echo "Uploading to multiple hosts for verification..."
-
-        # Try transfer.sh
-        echo "=== transfer.sh ==="
-        curl --upload-file "$APK" "https://transfer.sh/app-debug-${{ github.run_number }}.apk" 2>&1 | tee -a verified-links.txt || echo "transfer.sh failed" >> verified-links.txt
-        echo "" >> verified-links.txt
-
-        # Try 0x0.st (more reliable)
-        echo "=== 0x0.st ==="
-        curl -F "file=@$APK" https://0x0.st 2>&1 | tee -a verified-links.txt || echo "0x0.st failed" >> verified-links.txt
-        echo "" >> verified-links.txt
-
-        # Try catbox
-        echo "=== catbox.moe ==="
-        curl -F "reqtype=fileupload" -F "fileToUpload=@$APK" https://catbox.moe/user/api.php 2>&1 | tee -a verified-links.txt || echo "catbox failed" >> verified-links.txt
-        echo "" >> verified-links.txt
-
-        echo "=== VERIFIED LINKS ==="
-        cat verified-links.txt
-        ls -lh verified-links.txt
-
-        # Also create summary
-        echo "## 📲 روابط تحميل مباشرة - تم إنشاء التطبيق بنجاح" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**حجم APK:** $(du -h $APK | cut -f1)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        cat verified-links.txt >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-
-        # Push verified links to repo for direct reading via git (bypass artifact outage)
+        echo "## Build ${{ github.run_number }} - Direct Download" > DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        echo "APK built successfully!" >> DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        echo "### GitHub Release (direct, no login required):" >> DIRECT_LINKS.md
+        echo "https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/app-debug.apk" >> DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        echo "### GitHub Actions Artifact (requires login, may be delayed due to outage):" >> DIRECT_LINKS.md
+        echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        echo "Commit: ${{ github.sha }}" >> DIRECT_LINKS.md
+        cat DIRECT_LINKS.md
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        echo "# Verified Direct Download Links - Build ${{ github.run_number }}" > DIRECT_LINKS.md
-        echo "Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> DIRECT_LINKS.md
-        echo "Commit: ${{ github.sha }}" >> DIRECT_LINKS.md
-        echo "" >> DIRECT_LINKS.md
-        cat verified-links.txt >> DIRECT_LINKS.md
-        echo "" >> DIRECT_LINKS.md
-        echo "Generated: $(date -u)" >> DIRECT_LINKS.md
-        git add DIRECT_LINKS.md verified-links.txt || true
-        git commit -m "ci: verified direct links for run ${{ github.run_number }}" || echo "no commit needed"
-        git push origin HEAD:${{ github.ref_name }} || echo "push failed but links in summary"
-
-    - name: Upload Verified Links Artifact
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: verified-links
-        path: verified-links.txt
+        git add DIRECT_LINKS.md
+        git commit -m "ci: direct download links for build ${{ github.run_number }}" || true
+        git push origin HEAD:${{ github.ref_name }} || true
