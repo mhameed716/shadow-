@@ -1,4 +1,4 @@
-herepackage com.example.pureshell;
+package com.example.pureshell;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

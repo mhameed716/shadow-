@@ -7,9 +7,6 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,8 +14,6 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -26,69 +21,19 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Setup Android SDK components
+    - name: Setup Android SDK
       run: |
-        echo "ANDROID_HOME=$ANDROID_HOME"
-        sdkmanager --version || true
+        sdkmanager --version
         yes | sdkmanager --licenses || true
-        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "install skip"
-        sdkmanager --list_installed || true
+        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
 
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
       uses: gradle/actions/setup-gradle@v3
       with:
         gradle-version: 8.4
-        cache-read-only: false
-
-    - name: Project diagnostics
-      run: |
-        echo "=== settings.gradle ==="; cat settings.gradle
-        echo "=== build.gradle ==="; cat build.gradle
-        echo "=== app/build.gradle ==="; cat app/build.gradle
-        echo "=== gradle.properties ==="; cat gradle.properties
-        echo "=== wrapper ==="; cat gradle/wrapper/gradle-wrapper.properties || true
-        gradle --version
-        java -version
 
     - name: Build APK with Gradle
-      id: build
-      run: |
-        set -o pipefail
-        # Capture full log, also print to stdout
-        gradle assembleDebug --stacktrace --warning-mode all 2>&1 | tee build.log
-        echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
-
-    - name: Publish build log to repo on failure
-      if: failure()
-      run: |
-        echo "Build failed with $EXIT_CODE, pushing log to branch"
-        cat build.log | head -n 100
-        echo "--- TAIL ---"
-        cat build.log | tail -n 200
-        # Extract failure reason
-        echo "=== FAILURE REASON ==="
-        grep -i -A10 -B2 "FAILURE\|What went wrong\|Exception\|error:" build.log | head -n 150 || true
-        # Push log file to branch for inspection (bypass blob outage)
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        cp build.log build-failure.log
-        # Also create summary file
-        echo "# Build failure analysis" > failure-analysis.md
-        echo "" >> failure-analysis.md
-        echo "**Run:** $GITHUB_RUN_ID" >> failure-analysis.md
-        echo "**Exit:** $EXIT_CODE" >> failure-analysis.md
-        echo "" >> failure-analysis.md
-        echo '```' >> failure-analysis.md
-        grep -i -A10 -B2 "FAILURE\|What went wrong\|error:\|Exception" build.log | head -n 200 >> failure-analysis.md || true
-        echo '```' >> failure-analysis.md
-        echo "" >> failure-analysis.md
-        echo "## Tail" >> failure-analysis.md
-        echo '```' >> failure-analysis.md
-        tail -n 200 build.log >> failure-analysis.md || true
-        echo '```' >> failure-analysis.md
-        git add build-failure.log failure-analysis.md || true
-        git commit -m "ci: add build failure log $GITHUB_RUN_ID" || echo "no change"
-        git push origin HEAD:${GITHUB_REF_NAME} || echo "push failed"
+      run: gradle assembleDebug --stacktrace
 
     - name: Upload APK
       if: success()
@@ -96,13 +41,3 @@ jobs:
       with:
         name: app-debug
         path: app/build/outputs/apk/debug/*.apk
-
-    - name: Upload build log artifact
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          build.log
-          build-failure.log
-          failure-analysis.md
