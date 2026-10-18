@@ -21,14 +21,39 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
+    - name: Setup Android SDK components
+      run: |
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        ls -la $ANDROID_HOME || ls -la $ANDROID_SDK_ROOT || true
+        # Install required components if missing
+        sdkmanager --version || true
+        yes | sdkmanager --licenses || true
+        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "sdkmanager install failed - may already installed"
+        sdkmanager --list_installed || true
+
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
       uses: gradle/actions/setup-gradle@v3
       with:
         gradle-version: 8.4
         cache-read-only: false
 
+    - name: List project files
+      run: |
+        pwd
+        ls -R
+        cat settings.gradle
+        cat build.gradle
+        cat app/build.gradle
+        cat gradle.properties || true
+        cat gradle/wrapper/gradle-wrapper.properties || true
+
     - name: Build APK with Gradle
-      run: gradle assembleDebug --stacktrace --info
+      run: |
+        set -o pipefail
+        gradle assembleDebug --stacktrace --info 2>&1 | tee build.log
+        echo "EXIT_CODE=${PIPESTATUS[0]}"
+        exit ${PIPESTATUS[0]}
 
     - name: Upload APK
       if: success()
@@ -38,12 +63,14 @@ jobs:
         path: app/build/outputs/apk/debug/*.apk
         if-no-files-found: warn
 
-    - name: Upload build reports on failure
-      if: failure()
+    - name: Upload build log and reports
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-reports
+        name: build-logs
         path: |
+          build.log
           app/build/reports/
           build/reports/
+          app/build/outputs/logs/
         if-no-files-found: ignore
