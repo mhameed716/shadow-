@@ -24,13 +24,11 @@ jobs:
     - name: Setup Android SDK
       run: |
         echo "ANDROID_HOME=$ANDROID_HOME"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        # SDK is preinstalled on ubuntu-latest; just verify and ensure PATH
         export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/bin:$PATH"
-        ls -la "$ANDROID_HOME/cmdline-tools/latest/bin/" || ls -la "$ANDROID_HOME/cmdline-tools/" || true
-        sdkmanager --version || echo "sdkmanager not in PATH, will use preinstalled SDK"
+        ls -la "$ANDROID_HOME/cmdline-tools/latest/bin/" || true
+        sdkmanager --version || echo "sdkmanager not in PATH"
         yes | sdkmanager --licenses || true
-        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "SDK components already installed or install skipped"
+        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "SDK already installed"
         sdkmanager --list_installed || true
 
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
@@ -41,9 +39,42 @@ jobs:
     - name: Build APK with Gradle
       run: gradle assembleDebug --stacktrace
 
-    - name: Upload APK
+    - name: Upload APK Artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
         path: app/build/outputs/apk/debug/*.apk
+        retention-days: 30
+
+    - name: Create Direct Download Link (transfer.sh)
+      if: success()
+      run: |
+        APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
+        echo "Found APK: $APK"
+        ls -lh "$APK"
+        # Upload to transfer.sh for direct public download (no login required)
+        echo "Uploading to transfer.sh..."
+        curl --upload-file "$APK" "https://transfer.sh/app-debug-${{ github.run_number }}.apk" --silent --show-error | tee direct-link.txt
+        echo "" >> direct-link.txt
+        echo "Direct link saved to direct-link.txt"
+        cat direct-link.txt
+        # Also add to summary for easy copy
+        echo "## 📲 رابط تحميل مباشر" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "APK تم بناؤه بنجاح! حجم: $(du -h $APK | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### رابط مباشر (بدون تسجيل دخول):" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        cat direct-link.txt >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### رابط GitHub Actions (يتطلب تسجيل دخول):" >> $GITHUB_STEP_SUMMARY
+        echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload Direct Link Artifact
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: direct-link
+        path: direct-link.txt
