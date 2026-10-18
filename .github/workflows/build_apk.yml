@@ -27,7 +27,7 @@ jobs:
         ls -la $ANDROID_HOME || true
         sdkmanager --version || true
         yes | sdkmanager --licenses || true
-        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393" || echo "install done/skip"
+        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "install done/skip"
         sdkmanager --list_installed || true
 
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
@@ -45,6 +45,7 @@ jobs:
         echo "=== wrapper ==="; cat gradle/wrapper/gradle-wrapper.properties || true
         echo "=== java ==="; java -version
         echo "=== gradle ==="; gradle --version
+        echo "=== files ==="; find . -type f | sort
 
     - name: Build APK with Gradle
       id: build
@@ -53,23 +54,33 @@ jobs:
         gradle assembleDebug --stacktrace 2>&1 | tee build.log
         EXIT_CODE=${PIPESTATUS[0]}
         echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-        # Always create summary
-        echo "## Build Result" >> $GITHUB_STEP_SUMMARY
-        echo "Exit code: $EXIT_CODE" >> $GITHUB_STEP_SUMMARY
+        echo "## Build Result - Exit $EXIT_CODE" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Last 200 lines of build.log" >> $GITHUB_STEP_SUMMARY
+        # Extract key error sections
+        echo "### Key errors" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        tail -n 200 build.log >> $GITHUB_STEP_SUMMARY || true
+        grep -n -i -A5 -B5 "FAILURE\|What went wrong\|error\|exception\|FAILED\|not found\|missing\|could not" build.log | head -n 300 >> $GITHUB_STEP_SUMMARY || true
         echo '```' >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Full log (first 500 lines)" >> $GITHUB_STEP_SUMMARY
+        echo "### Tail 150" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        head -n 500 build.log >> $GITHUB_STEP_SUMMARY || true
+        tail -n 150 build.log >> $GITHUB_STEP_SUMMARY || true
         echo '```' >> $GITHUB_STEP_SUMMARY
-        # Also emit as annotation for API visibility
+        
+        # Emit critical lines as annotations (visible via API)
+        echo "--- EMIT ANNOTATIONS ---"
+        grep -i "What went wrong\|FAILURE\|error:" build.log | head -n 20 | while IFS= read -r line; do
+          # Escape % and newline for github
+          safe=$(echo "$line" | tr -d '\r' | head -c 500)
+          echo "::error::$safe"
+        done || true
+        grep -i "could not\|not found\|missing\|failed" build.log | head -n 30 | while IFS= read -r line; do
+          safe=$(echo "$line" | tr -d '\r' | head -c 500)
+          echo "::warning::$safe"
+        done || true
+        
         if [ $EXIT_CODE -ne 0 ]; then
-          echo "::error::Gradle build failed with exit $EXIT_CODE - check summary"
-          tail -n 100 build.log | while IFS= read -r line; do echo "::warning::$line"; done || true
+          echo "::error::Gradle build failed with exit $EXIT_CODE"
         fi
         exit $EXIT_CODE
 
