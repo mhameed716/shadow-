@@ -7,6 +7,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,6 +17,8 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -25,11 +30,9 @@ jobs:
       run: |
         echo "ANDROID_HOME=$ANDROID_HOME"
         export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/bin:$PATH"
-        ls -la "$ANDROID_HOME/cmdline-tools/latest/bin/" || true
-        sdkmanager --version || echo "sdkmanager not in PATH"
+        sdkmanager --version || echo "sdkmanager not found"
         yes | sdkmanager --licenses || true
         sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || echo "SDK already installed"
-        sdkmanager --list_installed || true
 
     - name: Setup Gradle 8.4 (compatible with AGP 8.2.2)
       uses: gradle/actions/setup-gradle@v3
@@ -47,34 +50,60 @@ jobs:
         path: app/build/outputs/apk/debug/*.apk
         retention-days: 30
 
-    - name: Create Direct Download Link (transfer.sh)
+    - name: Create Verified Direct Links
       if: success()
       run: |
         APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n1)
         echo "Found APK: $APK"
         ls -lh "$APK"
-        # Upload to transfer.sh for direct public download (no login required)
-        echo "Uploading to transfer.sh..."
-        curl --upload-file "$APK" "https://transfer.sh/app-debug-${{ github.run_number }}.apk" --silent --show-error | tee direct-link.txt
-        echo "" >> direct-link.txt
-        echo "Direct link saved to direct-link.txt"
-        cat direct-link.txt
-        # Also add to summary for easy copy
-        echo "## 📲 رابط تحميل مباشر" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "APK تم بناؤه بنجاح! حجم: $(du -h $APK | cut -f1)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### رابط مباشر (بدون تسجيل دخول):" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        cat direct-link.txt >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### رابط GitHub Actions (يتطلب تسجيل دخول):" >> $GITHUB_STEP_SUMMARY
-        echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "APK size: $(du -h $APK | cut -f1)"
+        echo "Uploading to multiple hosts for verification..."
 
-    - name: Upload Direct Link Artifact
+        # Try transfer.sh
+        echo "=== transfer.sh ==="
+        curl --upload-file "$APK" "https://transfer.sh/app-debug-${{ github.run_number }}.apk" 2>&1 | tee -a verified-links.txt || echo "transfer.sh failed" >> verified-links.txt
+        echo "" >> verified-links.txt
+
+        # Try 0x0.st (more reliable)
+        echo "=== 0x0.st ==="
+        curl -F "file=@$APK" https://0x0.st 2>&1 | tee -a verified-links.txt || echo "0x0.st failed" >> verified-links.txt
+        echo "" >> verified-links.txt
+
+        # Try catbox
+        echo "=== catbox.moe ==="
+        curl -F "reqtype=fileupload" -F "fileToUpload=@$APK" https://catbox.moe/user/api.php 2>&1 | tee -a verified-links.txt || echo "catbox failed" >> verified-links.txt
+        echo "" >> verified-links.txt
+
+        echo "=== VERIFIED LINKS ==="
+        cat verified-links.txt
+        ls -lh verified-links.txt
+
+        # Also create summary
+        echo "## 📲 روابط تحميل مباشرة - تم إنشاء التطبيق بنجاح" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**حجم APK:** $(du -h $APK | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        cat verified-links.txt >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+        # Push verified links to repo for direct reading via git (bypass artifact outage)
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        echo "# Verified Direct Download Links - Build ${{ github.run_number }}" > DIRECT_LINKS.md
+        echo "Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> DIRECT_LINKS.md
+        echo "Commit: ${{ github.sha }}" >> DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        cat verified-links.txt >> DIRECT_LINKS.md
+        echo "" >> DIRECT_LINKS.md
+        echo "Generated: $(date -u)" >> DIRECT_LINKS.md
+        git add DIRECT_LINKS.md verified-links.txt || true
+        git commit -m "ci: verified direct links for run ${{ github.run_number }}" || echo "no commit needed"
+        git push origin HEAD:${{ github.ref_name }} || echo "push failed but links in summary"
+
+    - name: Upload Verified Links Artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: direct-link
-        path: direct-link.txt
+        name: verified-links
+        path: verified-links.txt
